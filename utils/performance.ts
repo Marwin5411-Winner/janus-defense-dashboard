@@ -63,12 +63,29 @@ export class VesselPerformanceOptimizer {
 
   // Cluster vessels that are very close together at low zoom
   clusterVessels(vessels: any[], zoom: number): any[] {
-    if (zoom >= 8) return vessels // No clustering at high zoom
+    // Hard limit - never render more than 200 vessels for performance
+    const maxVessels = 200
+    let workingVessels = vessels
+    
+    if (vessels.length > maxVessels) {
+      // Prioritize: Military > Dark vessels > Recent > others
+      workingVessels = vessels
+        .sort((a, b) => {
+          const aScore = (a.shipType === 'Military' ? 100 : 0) + (a.isDark ? 50 : 0)
+          const bScore = (b.shipType === 'Military' ? 100 : 0) + (b.isDark ? 50 : 0)
+          return bScore - aScore
+        })
+        .slice(0, maxVessels)
+    }
+    
+    if (zoom >= 8) return workingVessels // No clustering at high zoom
 
     const clusterDistance = zoom < 4 ? 0.5 : 0.2 // degrees
     const clusters = new Map<string, any[]>()
 
     vessels.forEach(vessel => {
+      if (!vessel.latitude || !vessel.longitude) return
+      if (isNaN(vessel.latitude) || isNaN(vessel.longitude)) return
       const key = this.getClusterKey(vessel.latitude, vessel.longitude, clusterDistance)
       if (!clusters.has(key)) {
         clusters.set(key, [])
@@ -105,7 +122,9 @@ export class VesselPerformanceOptimizer {
 
   // Optimize data transfer for large datasets
   prepareVesselDataForDeckGL(vessels: any[]) {
-    return vessels.map(vessel => ({
+    return vessels
+      .filter(vessel => vessel.latitude && vessel.longitude && !isNaN(vessel.latitude) && !isNaN(vessel.longitude))
+      .map(vessel => ({
       id: vessel.id,
       position: [vessel.estimatedLon || vessel.longitude, vessel.estimatedLat || vessel.latitude],
       originalPosition: [vessel.longitude, vessel.latitude],

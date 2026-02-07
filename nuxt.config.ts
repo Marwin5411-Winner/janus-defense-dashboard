@@ -13,10 +13,11 @@ export default defineNuxtConfig({
     // Private keys (only available on server-side)
     janusApiUrl: process.env.NUXT_JANUS_API_URL || 'http://localhost:3001',
     janusApiKey: process.env.NUXT_JANUS_API_KEY,
+    dbPassword: process.env.DB_PASSWORD,
     // Public keys (exposed to client-side)
     public: {
       mapTileUrl: process.env.NUXT_PUBLIC_MAP_TILE_URL || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      refreshInterval: process.env.NUXT_PUBLIC_REFRESH_INTERVAL || 5000
+      refreshInterval: parseInt(process.env.NUXT_PUBLIC_REFRESH_INTERVAL || '5000')
     }
   }
 })

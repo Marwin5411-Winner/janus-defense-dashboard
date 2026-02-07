@@ -1,11 +1,13 @@
 import pg from 'pg'
 
+
 export default defineEventHandler(async (event) => {
+  const config = useRuntimeConfig()
   const pool = new pg.Pool({
     host: 'db-postgresql-sgp1-77927-do-user-11181753-0.f.db.ondigitalocean.com',
     port: 25060,
     user: 'janus',
-    password: process.env.DB_PASSWORD,
+    password: config.dbPassword as string,
     database: 'janus-gateway',
     ssl: {
       rejectUnauthorized: false
@@ -30,7 +32,12 @@ export default defineEventHandler(async (event) => {
           mmsi, ship_name as name, latitude, longitude, speed_kn as speed, course, last_seen as timestamp, geom
         FROM vessels 
         WHERE last_seen > NOW() - INTERVAL '12 hours'
+          AND latitude IS NOT NULL 
+          AND longitude IS NOT NULL
+          AND latitude BETWEEN -90 AND 90
+          AND longitude BETWEEN -180 AND 180
         ORDER BY mmsi, last_seen DESC
+        LIMIT 500
       ),
       coverage_check AS (
         SELECT *,

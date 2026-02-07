@@ -1,7 +1,6 @@
 <template>
   <div class="h-full w-full relative">
-    <div ref="mapContainer" class="h-full w-full overflow-hidden absolute inset-0 z-0"></div>
-    <canvas ref="deckCanvas" class="h-full w-full absolute inset-0 z-10 pointer-events-none"></canvas>
+    <div ref="mapContainer" class="h-full w-full overflow-hidden absolute inset-0"></div>
     
     <!-- Loading overlay -->
     <div v-if="loading" class="absolute inset-0 z-50 bg-gray-900 bg-opacity-75 flex items-center justify-center rounded-lg">
@@ -56,27 +55,24 @@
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useVesselStore } from '~/stores/vessel'
 import { getCountryByMMSI } from '~/utils/mmsi'
-import { VesselPerformanceOptimizer, VesselWorker, AnimationManager } from '~/utils/performance'
+import { VesselPerformanceOptimizer } from '~/utils/performance'
 import maplibregl from 'maplibre-gl'
-import { Deck } from '@deck.gl/core'
+import { MapboxOverlay } from '@deck.gl/mapbox'
 import { IconLayer, ScatterplotLayer, PathLayer } from '@deck.gl/layers'
 
 const vesselStore = useVesselStore()
 const mapContainer = ref(null)
-const deckCanvas = ref(null)
 const loading = ref(true)
 const autoRefresh = ref(true)
 
 let map = null
-let deck = null
+let deckOverlay = null
 let refreshInterval = null
 let performanceOptimizer = null
-let vesselWorker = null
-let animationManager = null
 let currentViewState = null
 
 // SVG Data URI for Military Vessel (Red Triangle)
-const MILITARY_ICON_URL = 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ef4444"%3E%3Cpath d="M12 2L2 22h20L12 2z"/%3E%3Cpath d="M12 6l-6 12h12L12 6z" fill="black" opacity="0.3"/%3E%3C/svg%3E';
+const MILITARY_ICON_URL = 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23ef4444"%3E%3Cpath d="M12 2L2 22h20L12 2z"/%3E%3Cpath d="M12 6l-6 12h12L12 6z" fill="black" opacity="0.3"/%3E%3C/svg%3E';
 
 const createPopupContent = (vessel) => {
   let statusInfo = ''
@@ -104,13 +100,12 @@ const createPopupContent = (vessel) => {
 }
 
 const initializeMap = () => {
-  if (!mapContainer.value || !deckCanvas.value) return
+  if (!mapContainer.value) return
 
   // Initialize performance optimizer
   performanceOptimizer = VesselPerformanceOptimizer.getInstance()
 
-  // Initialize MapLibre map (Base Layer)
-  // We disable interaction on the base map so Deck.gl can handle it
+  // Initialize MapLibre map
   map = new maplibregl.Map({
     container: mapContainer.value,
     style: {
@@ -134,52 +129,36 @@ const initializeMap = () => {
           type: 'raster',
           source: 'dark-tiles',
           minzoom: 0,
-          maxzoom: 22,
-          paint: {
-            'raster-opacity': 1.0 // Increased opacity
-          }
+          maxzoom: 22
         }
       ]
     },
     center: [105.0, 10.0],
     zoom: 6,
     pitch: 0,
-    bearing: 0,
-    interactive: true // Re-enable interaction for testing
+    bearing: 0
   })
 
-  // Initialize Deck.gl (Overlay Layer)
-  deck = new Deck({
-    canvas: deckCanvas.value,
-    width: '100%',
-    height: '100%',
-    initialViewState: {
-      longitude: 105.0,
-      latitude: 10.0,
-      zoom: 6,
-      pitch: 0,
-      bearing: 0
-    },
-    controller: true,
-    useDevicePixels: true,
-    onViewStateChange: ({ viewState }) => {
-      // Sync MapLibre view with Deck.gl
-      map.jumpTo({
-        center: [viewState.longitude, viewState.latitude],
-        zoom: viewState.zoom,
-        bearing: viewState.bearing,
-        pitch: viewState.pitch
-      })
-      
-      currentViewState = viewState
-      performanceOptimizer.updateViewportBounds(viewState)
-      return viewState
-    },
-    layers: [] // Initial empty layers
+  // Initialize Deck.gl overlay (interleaved mode - renders into MapLibre's WebGL context)
+  deckOverlay = new MapboxOverlay({
+    interleaved: true,
+    layers: []
   })
 
-  // Handle deck clicks/interaction if needed
-  
+  // Add deck.gl overlay as a MapLibre control
+  map.addControl(deckOverlay)
+
+  // Track view state changes
+  map.on('move', () => {
+    const center = map.getCenter()
+    currentViewState = {
+      longitude: center.lng,
+      latitude: center.lat,
+      zoom: map.getZoom()
+    }
+    performanceOptimizer.updateViewportBounds(currentViewState)
+  })
+
   // Wait for map to load
   map.on('load', () => {
     console.log('MapLibre base map loaded')
@@ -189,7 +168,7 @@ const initializeMap = () => {
 }
 
 const updateVesselLayers = () => {
-  if (!deck) return
+  if (!deckOverlay) return
 
   // Get current zoom for Level of Detail (LOD)
   const zoom = currentViewState ? currentViewState.zoom : 6
@@ -200,11 +179,10 @@ const updateVesselLayers = () => {
 
   if (!vesselData || vesselData.length === 0) {
     console.log('No vessel data to render')
-    if (deck) deck.setProps({ layers: [] })
+    deckOverlay.setProps({ layers: [] })
     return
   }
 
-  // Force re-render by clearing layers first if necessary, or just log
   console.log(`Updating layers with ${vesselData.length} vessels at zoom ${zoom}`)
 
   // Split data for different layers
@@ -283,14 +261,11 @@ const updateVesselLayers = () => {
     widthMinPixels: 2,
     getPath: d => d.path,
     getColor: d => d.color,
-    getWidth: 2,
-    dashJustified: true,
-    dashSize: 5,
-    gapSize: 3
+    getWidth: 2
   })
 
-  // Update deck.gl layers
-  deck.setProps({
+  // Update deck.gl layers via overlay
+  deckOverlay.setProps({
     layers: [pathLayer, commercialLayer, militaryLayer]
   })
 }
@@ -345,20 +320,12 @@ watch(() => vesselStore.vessels, updateVesselLayers, { deep: true })
 
 // Watch for map focus requests
 watch(() => vesselStore.mapFocus, (focus) => {
-  if (focus && deck) {
-    const viewState = {
-      longitude: focus.lon,
-      latitude: focus.lat,
+  if (focus && map) {
+    map.flyTo({
+      center: [focus.lon, focus.lat],
       zoom: focus.zoom || 12,
-      pitch: 0,
-      bearing: 0,
-      transitionDuration: 1500,
-      transitionInterpolator: new deck.FlyToInterpolator() // This creates the fly-to effect
-    }
-    
-    // We update Deck's view state, which will trigger onViewStateChange
-    // which will then sync the MapLibre map.
-    deck.setProps({ initialViewState: viewState })
+      duration: 1500
+    })
   }
 })
 
@@ -374,8 +341,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopAutoRefresh()
-  if (deck) {
-    deck.finalize()
+  if (deckOverlay) {
+    deckOverlay.setProps({ layers: [] })
   }
   if (map) {
     map.remove()

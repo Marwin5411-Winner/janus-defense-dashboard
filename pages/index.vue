@@ -62,7 +62,7 @@
         <div class="absolute top-0 left-0 z-10 bg-black/80 border-b border-r border-[#333] px-2 py-0.5 text-[10px] text-white">
           SATELLITE POSITIONING: <span class="text-[#ffb000]">ACTIVE</span>
         </div>
-        <div class="h-full w-full grayscale contrast-125 brightness-75 hover:grayscale-0 transition-all duration-500">
+        <div class="h-full w-full">
           <ClientOnly>
             <MapVesselMap />
           </ClientOnly>
@@ -218,17 +218,13 @@ onUnmounted(() => {
   animation: ticker 30s linear infinite;
 }
 
-/* Adjust Leaflet for Bloomberg look */
-.leaflet-container {
-  background: #000 !important;
-  height: 100% !important;
-  width: 100% !important;
-  z-index: 1;
+/* Hide default MapLibre attribution */
+.maplibregl-ctrl-attrib {
+  display: none !important;
 }
-.leaflet-tile-container {
-  background: #000 !important;
-}
-.leaflet-tile {
-  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%) !important;
+
+/* Ensure map container has proper background */
+.maplibregl-canvas {
+  background: #1a1a1a !important;
 }
 </style>
