@@ -83,7 +83,7 @@ export class VesselPerformanceOptimizer {
     const clusterDistance = zoom < 4 ? 0.5 : 0.2 // degrees
     const clusters = new Map<string, any[]>()
 
-    vessels.forEach(vessel => {
+    workingVessels.forEach(vessel => {
       if (!vessel.latitude || !vessel.longitude) return
       if (isNaN(vessel.latitude) || isNaN(vessel.longitude)) return
       const key = this.getClusterKey(vessel.latitude, vessel.longitude, clusterDistance)

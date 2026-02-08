@@ -70,6 +70,7 @@ let deckOverlay = null
 let refreshInterval = null
 let performanceOptimizer = null
 let currentViewState = null
+let mapLoaded = false
 
 // SVG Data URI for Military Vessel (Red Triangle)
 const MILITARY_ICON_URL = 'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="%23ef4444"%3E%3Cpath d="M12 2L2 22h20L12 2z"/%3E%3Cpath d="M12 6l-6 12h12L12 6z" fill="black" opacity="0.3"/%3E%3C/svg%3E';
@@ -139,15 +140,6 @@ const initializeMap = () => {
     bearing: 0
   })
 
-  // Initialize Deck.gl overlay (interleaved mode - renders into MapLibre's WebGL context)
-  deckOverlay = new MapboxOverlay({
-    interleaved: true,
-    layers: []
-  })
-
-  // Add deck.gl overlay as a MapLibre control
-  map.addControl(deckOverlay)
-
   // Track view state changes
   map.on('move', () => {
     const center = map.getCenter()
@@ -159,16 +151,29 @@ const initializeMap = () => {
     performanceOptimizer.updateViewportBounds(currentViewState)
   })
 
-  // Wait for map to load
+  // Wait for map to load, then initialize Deck.gl overlay
+  // NOTE: In interleaved mode, overlay MUST be created after map load
+  // to properly share the WebGL context
   map.on('load', () => {
     console.log('MapLibre base map loaded')
+
+    // Initialize Deck.gl overlay (interleaved mode - renders into MapLibre's WebGL context)
+    deckOverlay = new MapboxOverlay({
+      interleaved: true,
+      layers: []
+    })
+
+    // Add deck.gl overlay as a MapLibre control
+    map.addControl(deckOverlay)
+
+    mapLoaded = true
     loading.value = false
     updateVesselLayers()
   })
 }
 
 const updateVesselLayers = () => {
-  if (!deckOverlay) return
+  if (!deckOverlay || !mapLoaded) return
 
   // Get current zoom for Level of Detail (LOD)
   const zoom = currentViewState ? currentViewState.zoom : 6
@@ -189,16 +194,16 @@ const updateVesselLayers = () => {
   const militaryVessels = vesselData.filter(d => d.vessel && d.vessel.shipType === 'Military')
   const otherVessels = vesselData.filter(d => d.vessel && d.vessel.shipType !== 'Military')
 
-  // 1. IconLayer for Military Vessels
+  // 1. IconLayer for Military Vessels (auto-packing mode for SVG support)
   const militaryLayer = new IconLayer({
     id: 'military-vessels',
     data: militaryVessels,
     pickable: true,
-    iconAtlas: MILITARY_ICON_URL,
-    iconMapping: {
-      marker: { x: 0, y: 0, width: 24, height: 24, mask: false }
-    },
-    getIcon: d => 'marker',
+    getIcon: d => ({
+      url: MILITARY_ICON_URL,
+      width: 24,
+      height: 24
+    }),
     getSize: 32,
     getPosition: d => d.position,
     onClick: (info) => {
@@ -292,7 +297,7 @@ const showVesselPopup = (vessel, coordinate) => {
 
 const refreshData = async () => {
   await vesselStore.fetchVessels()
-  updateVesselLayers()
+  // updateVesselLayers is triggered by the deep watcher on vesselStore.vessels
 }
 
 const toggleAutoRefresh = () => {
